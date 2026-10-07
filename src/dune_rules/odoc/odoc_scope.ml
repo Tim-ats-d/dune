@@ -58,13 +58,30 @@ let lib_unique_name lib =
   let info = Lib.info lib in
   let status = Lib_info.status info in
   match status with
-  | Installed_private | Installed -> assert false
+  | Installed_private | Installed ->
+    Code_error.raise
+      "Odoc_scope.lib_unique_name: installed library"
+      [ "name", Lib_name.to_dyn name ]
   | Public _ -> Lib_name.to_string name
   | Private (project, _) -> Scope_key.to_string name project
 ;;
 
-let pkg_or_lnu lib =
-  match Lib_info.package (Lib.info lib) with
-  | Some p -> Package.Name.to_string p
-  | None -> lib_unique_name lib
+type t =
+  | Package of Package.Name.t
+  | Private_lib of
+      { name : Lib_name.t
+      ; project : Dune_project.t
+      }
+
+let of_lib lib =
+  let name = Lib.name lib in
+  match Lib_info.status (Lib.info lib) with
+  | Installed_private | Installed -> Package (Lib_name.package_name name)
+  | Public (_, pkg) | Private (_, Some pkg) -> Package (Package.name pkg)
+  | Private (project, None) -> Private_lib { name; project }
+;;
+
+let to_string = function
+  | Package pkg -> Package.Name.to_string pkg
+  | Private_lib { name; project } -> Scope_key.to_string name project
 ;;

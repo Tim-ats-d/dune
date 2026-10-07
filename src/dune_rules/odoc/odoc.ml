@@ -34,7 +34,7 @@ module Paths = struct
     ++
     match m with
     | Pkg pkg -> Package.Name.to_string pkg
-    | Lib lib -> Odoc_scope.pkg_or_lnu (Lib.Local.to_lib lib)
+    | Lib lib -> Odoc_scope.of_lib (Lib.Local.to_lib lib) |> Odoc_scope.to_string
   ;;
 
   let html ctx m = add_pkg_lnu (html_root ctx) m
@@ -310,7 +310,7 @@ let compile_module
       (m : Module.t)
       ~includes:(file_deps, iflags)
       ~dep_graphs
-      ~pkg_or_lnu
+      ~scope
       ~mode
   =
   let odoc_file = Obj_dir.Module.odoc obj_dir m in
@@ -327,7 +327,7 @@ let compile_module
           [ A "-I"
           ; Path doc_dir
           ; iflags
-          ; As [ "--pkg"; pkg_or_lnu ]
+          ; As [ "--pkg"; Odoc_scope.to_string scope ]
           ; A "-o"
           ; Target odoc_file
           ; Dep
@@ -421,7 +421,7 @@ let link_odoc_rules sctx (odoc_file : Artifact.t) ~pkg ~requires =
 let setup_library_odoc_rules cctx (local_lib : Lib.Local.t) =
   (* Using the proper package name doesn't actually work since odoc assumes that
      a package contains only 1 library *)
-  let pkg_or_lnu = Odoc_scope.pkg_or_lnu (Lib.Local.to_lib local_lib) in
+  let scope = Odoc_scope.of_lib (Lib.Local.to_lib local_lib) in
   let sctx = Compilation_context.super_context cctx in
   let ctx = Super_context.context sctx in
   let info = Lib.Local.info local_lib in
@@ -445,7 +445,7 @@ let setup_library_odoc_rules cctx (local_lib : Lib.Local.t) =
         ~includes
         ~dep_graphs:(Compilation_context.dep_graphs cctx)
         ~obj_dir
-        ~pkg_or_lnu
+        ~scope
         ~mode:for_
         m
     in

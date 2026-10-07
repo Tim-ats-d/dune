@@ -12,5 +12,12 @@ end
     [name@key] where [key] identifies its project if it is private. *)
 val lib_unique_name : Lib.t -> string
 
-(** Package of the library if it has one, its unique name otherwise. *)
-val pkg_or_lnu : Lib.t -> string
+(** Where the documentation of a library goes: its package if it has one, or
+    the library itself if it is private and has no package. *)
+type t
+
+val of_lib : Lib.t -> t
+
+(** The package name, or [name@key] for a private library without a package,
+    where [key] identifies its project. *)
+val to_string : t -> string
