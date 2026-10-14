@@ -85,3 +85,25 @@ let to_string = function
   | Package pkg -> Package.Name.to_string pkg
   | Private_lib { name; project } -> Scope_key.to_string name project
 ;;
+
+module Parent_id = struct
+  type t = string
+
+  let to_string = Fun.id
+end
+
+let pkg_parent_id pkg = Package.Name.to_string pkg
+
+let lib_parent_id lib =
+  let name = Lib.name lib in
+  let in_package pkg name =
+    sprintf "%s/%s" (pkg_parent_id pkg) (Lib_name.to_string name)
+  in
+  match Lib_info.status (Lib.info lib) with
+  | Installed_private | Installed -> in_package (Lib_name.package_name name) name
+  | Public (_, pkg) -> in_package (Package.name pkg) name
+  | Private (_, Some pkg) ->
+    let pkg = Package.name pkg in
+    in_package pkg (Lib_name.mangled pkg (Lib_name.to_local_exn name))
+  | Private (project, None) -> Scope_key.to_string name project
+;;

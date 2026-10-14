@@ -21,3 +21,24 @@ val of_lib : Lib.t -> t
 (** The package name, or [name@key] for a private library without a package,
     where [key] identifies its project. *)
 val to_string : t -> string
+
+(** {1 Parent ID}
+
+  See Odoc [driver.mld]). *)
+
+module Parent_id : sig
+  type t
+
+  val to_string : t -> string
+end
+
+(** Parent id of the pages of a package: [pkg]. *)
+val pkg_parent_id : Package.Name.t -> Parent_id.t
+
+(** Parent id of the modules of a library:
+    - [pkg/pkg.foo] for a public or installed library [pkg.foo];
+    - [pkg/pkg.__private__.foo] for a private library [foo] of package [pkg],
+      which is the name it is installed under;
+    - [foo@key] for a private library [foo] without a package, where [key]
+      identifies its project. *)
+val lib_parent_id : Lib.t -> Parent_id.t
