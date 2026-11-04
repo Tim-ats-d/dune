@@ -17,10 +17,8 @@ let add_rule sctx =
 module Paths = struct
   let odoc_support_dirname = "odoc.support"
   let root (context : Context.t) = Path.Build.relative (Context.build_dir context) "_doc"
-
-  let odoc_dir ctx parent_id =
-    root ctx ++ "_odoc" ++ Odoc_scope.Parent_id.to_string parent_id
-  ;;
+  let odoc_root ctx = root ctx ++ "_odoc"
+  let odoc_dir ctx parent_id = odoc_root ctx ++ Odoc_scope.Parent_id.to_string parent_id
 
   let odocs ctx = function
     | Lib lib -> odoc_dir ctx (Odoc_scope.lib_parent_id (Lib.Local.to_lib lib))
@@ -381,6 +379,7 @@ let compile_module
 ;;
 
 let compile_mld sctx (m : Mld.t) ~includes ~doc_dir ~pkg =
+  let ctx = Super_context.context sctx in
   let odoc_file = Mld.odoc_file m ~doc_dir in
   let odoc_input = Mld.odoc_input m in
   let run_odoc =
@@ -391,9 +390,11 @@ let compile_mld sctx (m : Mld.t) ~includes ~doc_dir ~pkg =
       ~quiet:false
       ~flags_for:(Some odoc_input)
       [ Command.Args.dyn includes
-      ; As [ "--pkg"; Package.Name.to_string pkg ]
-      ; A "-o"
-      ; Target odoc_file
+      ; A "--parent-id"
+      ; A Odoc_scope.(Parent_id.to_string (pkg_parent_id pkg))
+      ; A "--output-dir"
+      ; Path (Path.build (Paths.odoc_root ctx))
+      ; Hidden_targets [ odoc_file ]
       ; Dep (Path.build odoc_input)
       ]
   in
@@ -1163,13 +1164,31 @@ let package_mlds =
       ~input:(module Super_context.As_memo_key.And_package_name)
       (fun (sctx, pkg) ->
          Rules.collect (fun () ->
+           let ctx = Super_context.context sctx in
            let* mlds, warnings = mlds sctx pkg in
            report_warnings warnings;
            let mlds =
              check_mlds_no_dupes ~pkg ~mlds ~path_to_string:(fun p ->
                Path.to_string_maybe_quoted (Path.build p))
            in
-           let ctx = Super_context.context sctx in
+           let* mlds =
+             String.Map.to_list mlds
+             |> Memo.parallel_map ~f:(fun (key, (path, name)) ->
+               let source_name =
+                 Path.Build.basename path
+                 |> Filename.remove_extension
+                 |> Filename.to_string
+               in
+               if String.equal source_name name
+               then Memo.return (key, (path, name))
+               else (
+                 let copy = Paths.gen_mld_dir ctx pkg ++ (name ^ ".mld") in
+                 let+ () =
+                   add_rule sctx (Action_builder.copy ~src:(Path.build path) ~dst:copy)
+                 in
+                 key, (copy, name)))
+             >>| String.Map.of_list_exn
+           in
            if String.Map.mem mlds "index"
            then Memo.return mlds
            else (

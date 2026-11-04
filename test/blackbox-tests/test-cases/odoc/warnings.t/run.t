@@ -34,7 +34,7 @@ reference:
 In release mode, no error:
 
   $ dune build -p foo_doc,foo_lib @doc 2>&1 | censor
-  (cd _build/.sandbox/$DIGEST1/default/_doc/_odoc/foo_doc && odoc compile --pkg foo_doc -o page-foo.odoc ../../../foo_doc/foo.mld)
+  (cd _build/.sandbox/$DIGEST1/default/_doc/_odoc/foo_doc && odoc compile --parent-id foo_doc --output-dir .. ../../../foo_doc/foo.mld)
   File "../../../foo_doc/foo.mld", line 4, characters 0-0:
   Warning: End of text is not allowed in '[...]' (code).
   (cd _build/.sandbox/$DIGEST2/default/_doc/_odoc/foo_lib/foo_lib && odoc compile -I . -I .. --pkg foo_lib -o foo.odoc ../../../../foo_lib/.foo.objs/byte/foo.cmti)
