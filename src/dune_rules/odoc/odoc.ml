@@ -124,13 +124,16 @@ module Artifact = struct
     let basename = basename t in
     let suffix = Filename.of_string_exn (Output_format.extension output) in
     match t.target with
-    | Lib _ ->
+    | Lib lib ->
+      let parent_id =
+        Odoc_scope.Parent_id.to_string (Odoc_scope.lib_parent_id (Lib.Local.to_lib lib))
+      in
       (match output with
        | Html | Json ->
-         Paths.html ctx t.target ++ Stdune.String.capitalize basename ++ "index"
+         Paths.html_root ctx ++ parent_id ++ Stdune.String.capitalize basename ++ "index"
          |> Path.Build.extend_basename ~suffix
        | Markdown ->
-         Paths.markdown ctx t.target ++ Stdune.String.capitalize basename
+         Paths.markdown_root ctx ++ parent_id ++ Stdune.String.capitalize basename
          |> Path.Build.extend_basename ~suffix)
     | Pkg _ ->
       let base =
@@ -335,9 +338,10 @@ let compile_module
       (m : Module.t)
       ~includes:(file_deps, iflags)
       ~modules
-      ~scope
+      ~parent_id
       ~for_
   =
+  let ctx = Super_context.context sctx in
   let odoc_file = module_odoc_file ~odoc_dir m in
   let cmti_file =
     Obj_dir.Module.cmti_file
@@ -361,9 +365,11 @@ let compile_module
           [ A "-I"
           ; Path doc_dir
           ; iflags
-          ; As [ "--pkg"; Odoc_scope.to_string scope ]
-          ; A "-o"
-          ; Target odoc_file
+          ; A "--parent-id"
+          ; A (Odoc_scope.Parent_id.to_string parent_id)
+          ; A "--output-dir"
+          ; Path (Path.build (Paths.odoc_root ctx))
+          ; Hidden_targets [ odoc_file ]
           ; Dep (Path.build cmti_file)
           ]
       in
@@ -449,10 +455,8 @@ let link_odoc_rules sctx (odoc_file : Artifact.t) ~pkg ~requires =
 ;;
 
 let setup_library_odoc_rules sctx (local_lib : Lib.Local.t) =
-  (* Using the proper package name doesn't actually work since odoc assumes that
-     a package contains only 1 library *)
   let lib = Lib.Local.to_lib local_lib in
-  let scope = Odoc_scope.of_lib lib in
+  let parent_id = Odoc_scope.lib_parent_id lib in
   let ctx = Super_context.context sctx in
   let info = Lib.Local.info local_lib in
   let obj_dir = Lib.Local.obj_dir local_lib in
@@ -484,7 +488,7 @@ let setup_library_odoc_rules sctx (local_lib : Lib.Local.t) =
         ~obj_dir
         ~includes
         ~modules:modules_with_vlib
-        ~scope
+        ~parent_id
         ~for_
         m
     in

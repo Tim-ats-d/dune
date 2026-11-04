@@ -16,6 +16,6 @@ This test generates documentation for non-hidden modules only for a library:
 
  We don't expect html for hidden modules
   $ find _build/default -name '*.html' | sort -n
-  _build/default/_doc/_html/foo/Foo/index.html
+  _build/default/_doc/_html/foo/foo/Foo/index.html
   _build/default/_doc/_html/foo/index.html
   _build/default/_doc/_html/index.html

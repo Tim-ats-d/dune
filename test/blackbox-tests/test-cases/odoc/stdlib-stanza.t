@@ -38,5 +38,5 @@ No html is generated for Bar
 
   $ find _build/default -name '*.html' | sort -n
   _build/default/_doc/_html/index.html
-  _build/default/_doc/_html/l/L/index.html
   _build/default/_doc/_html/l/index.html
+  _build/default/_doc/_html/l/l/L/index.html
