@@ -1,0 +1,3 @@
+{0 my_pkg}
+
+The main module of my_pkg.bar is {!/my_pkg.bar/Bar}.
