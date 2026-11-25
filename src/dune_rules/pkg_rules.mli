@@ -46,6 +46,10 @@ val bin_paths_for_packages
   -> Context_name.t
   -> Path.t list Memo.t
 
+(** [compiler_bin_paths context] are the bin directories of the compiler package
+    of the lock directory of [context]. *)
+val compiler_bin_paths : Context_name.t -> Path.t list Memo.t
+
 val exported_env : Context_name.t -> Env.t Memo.t
 val project_ocamlpath : Context_name.t -> Path.t list Memo.t
 val dev_tool_ocamlpath : Dune_pkg.Dev_tool.t -> Path.t list Memo.t
@@ -72,14 +76,3 @@ val setup_pkg_install_alias
   :  dir:Path.Build.t
   -> Context_name.t
   -> Build_config.Gen_rules.t
-
-module Pkg_digest : sig
-  type t
-
-  val to_string : t -> string
-end
-
-val pkg_digest_of_project_dependency
-  :  Context_name.t
-  -> Package.Name.t
-  -> Pkg_digest.t option Memo.t
