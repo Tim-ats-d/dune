@@ -739,7 +739,7 @@ let compile_context_of_local_lib sctx (local_lib : Lib.Local.t) ~for_ =
 let rules (lib : Library.t) ~sctx ~dir_contents ~expander ~scope =
   let dir = Dir_contents.dir dir_contents in
   let buildable = lib.buildable in
-  let f ~for_ ~for_merlin =
+  let f ~for_ =
     let* local_lib, compile_info, source_modules, cctx =
       compile_context_data lib ~sctx ~dir_contents ~expander ~scope ~for_
     in
