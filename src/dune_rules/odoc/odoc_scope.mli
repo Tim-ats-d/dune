@@ -29,6 +29,10 @@ end
 (** Parent id of the pages of a package: [pkg]. *)
 val pkg_parent_id : Package.Name.t -> Parent_id.t
 
+(** Parent id of the pages of a package in the directory [dir] of its
+    documentation: [pkg/dir]. *)
+val pkg_page_parent_id : Package.Name.t -> dir:Path.Local.t -> Parent_id.t
+
 (** Parent id of the modules of a library:
     - [pkg/pkg.foo] for a public or installed library [pkg.foo];
     - [pkg/pkg.__private__.foo] for a private library [foo] of package

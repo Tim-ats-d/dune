@@ -81,6 +81,12 @@ end
 
 let pkg_parent_id pkg = Package.Name.to_string pkg
 
+let pkg_page_parent_id pkg ~dir =
+  if Path.Local.is_root dir
+  then pkg_parent_id pkg
+  else sprintf "%s/%s" (pkg_parent_id pkg) (Path.Local.to_string dir)
+;;
+
 let lib_parent_id lib =
   let name = Lib.name lib in
   let in_package pkg name =

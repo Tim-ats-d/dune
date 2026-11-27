@@ -4,6 +4,7 @@ module Gen_rules = Build_config.Gen_rules
 
 let ( ++ ) = Path.Build.relative
 let mld_ext = Filename.Extension.of_string_exn ".mld"
+let odocl_ext = Filename.Extension.of_string_exn ".odocl"
 
 type target =
   | Lib of Lib.Local.t
@@ -119,7 +120,18 @@ module Artifact = struct
     Path.Build.basename t.odoc_file |> Filename.remove_extension |> Filename.to_string
   ;;
 
-  let odocl_file ctx t = Paths.odocl ctx t.target ++ (basename t ^ ".odocl")
+  (* Path of the odoc file in the directory of its target. Pages can be in a
+     subdirectory, as in [guide/page-intro.odoc]. *)
+  let in_target_dir ctx t =
+    Path.drop_prefix_exn
+      (Path.build t.odoc_file)
+      ~prefix:(Path.build (Paths.odocs ctx t.target))
+  ;;
+
+  let odocl_file ctx t =
+    Path.Local.set_extension (in_target_dir ctx t) ~ext:odocl_ext
+    |> Path.Build.append_local (Paths.odocl ctx t.target)
+  ;;
 
   let output_file ctx (output : Output_format.t) t =
     let basename = basename t in
@@ -139,7 +151,9 @@ module Artifact = struct
         | Markdown -> Paths.markdown ctx t.target
         | Html | Json -> Paths.html ctx t.target
       in
-      base ++ (basename |> String.drop_prefix ~prefix:"page-" |> Option.value_exn)
+      let dir = Path.Local.parent_exn (in_target_dir ctx t) in
+      Path.Build.append_local base dir
+      ++ (basename |> String.drop_prefix ~prefix:"page-" |> Option.value_exn)
       |> Path.Build.extend_basename ~suffix
   ;;
 
@@ -212,35 +226,38 @@ let odoc_files_in_dirs dirs =
 module Mld : sig
   type t
 
-  val create : path:Path.Build.t -> name:string -> t
+  val create : path:Path.Build.t -> in_doc:Path.Local.t -> t
   val odoc_file : doc_dir:Path.Build.t -> t -> Path.Build.t
   val source : t -> Path.Build.t
+  val parent_id : pkg:Package.Name.t -> t -> Odoc_scope.Parent_id.t
   val odoc_input : gen_mld_dir:Path.Build.t -> t -> Path.Build.t
 end = struct
   (** The [(documentation (files ...))] stanza allows with the [as] keyword to
-      distinguish the input file and the path in the documentation. Here we do
-      not support layered hierarchy, but we do support changing the name (hence
-      the two fields) *)
+      distinguish the input file and its path in the documentation, such as
+      [guide/intro.mld]. *)
   type t =
     { path : Path.Build.t
-    ; name : string (** The name of the mld compilation unit (without extension) *)
+    ; in_doc : Path.Local.t
     }
 
-  let create ~path ~name = { path; name }
+  let create ~path ~in_doc = { path; in_doc }
+  let dir { in_doc; _ } = Path.Local.parent_exn in_doc
 
-  let odoc_file ~doc_dir { name; _ } =
-    Path.Build.relative doc_dir (sprintf "page-%s%s" name odoc_ext)
+  let odoc_file ~doc_dir ({ in_doc; _ } as t) =
+    let name = Path.Local.basename in_doc |> Filename.remove_extension in
+    Path.Build.append_local doc_dir (dir t)
+    ++ sprintf "page-%s%s" (Filename.to_string name) odoc_ext
   ;;
 
   let source { path; _ } = path
+  let parent_id ~pkg t = Odoc_scope.pkg_page_parent_id pkg ~dir:(dir t)
 
   (* With [--parent-id], odoc names the output after the basename of its
      input, so a renamed page is compiled from a copy in [gen_mld_dir]. *)
-  let odoc_input ~gen_mld_dir { path; name } =
-    let basename = name ^ ".mld" in
-    if String.equal (Filename.to_string (Path.Build.basename path)) basename
+  let odoc_input ~gen_mld_dir { path; in_doc } =
+    if Filename.equal (Path.Build.basename path) (Path.Local.basename in_doc)
     then path
-    else Path.Build.relative gen_mld_dir basename
+    else Path.Build.append_local gen_mld_dir in_doc
   ;;
 end
 
@@ -404,7 +421,7 @@ let compile_mld sctx (m : Mld.t) ~includes ~doc_dir ~pkg =
       [ Command.Args.dyn includes
       ; A "--output-dir"
       ; Path (Path.build (Paths.pages_odoc_root ctx))
-      ; As [ "--parent-id"; Odoc_scope.Parent_id.to_string (Paths.parent_id (Pkg pkg)) ]
+      ; As [ "--parent-id"; Odoc_scope.Parent_id.to_string (Mld.parent_id ~pkg m) ]
       ; Hidden_targets [ odoc_file ]
       ; Dep (Path.build odoc_input)
       ]
@@ -434,13 +451,13 @@ let odoc_link_flags ctx pkg requires =
     (let open Resolve.O in
      let+ libs = requires in
      let tree name dir = Command.Args.Concat (":", [ A name; Path (Path.build dir) ]) in
-     let pkg_flags, pkg_dirs =
+     let pkg_flags =
        match pkg with
-       | None -> [], []
+       | None -> []
        | Some p ->
          let name = Package.Name.to_string p in
          let dir = Paths.odocs ctx (Pkg p) in
-         [ Command.Args.A "-P"; tree name dir; A "--current-package"; A name ], [ dir ]
+         [ Command.Args.A "-P"; tree name dir; A "--current-package"; A name ]
      in
      let lib_flags, lib_dirs =
        (* Instances of a parameterised library share its odoc directory *)
@@ -452,11 +469,11 @@ let odoc_link_flags ctx pkg requires =
          [ Command.Args.A "-L"; tree (Lib_name.to_string name) dir ], dir)
        |> List.split
      in
-     let dirs = List.map ~f:Path.build (pkg_dirs @ lib_dirs) in
+     let dirs = List.map ~f:Path.build lib_dirs in
      Command.Args.S (odoc_files_in_dirs dirs :: (pkg_flags @ List.concat lib_flags)))
 ;;
 
-let link_odoc_rules sctx (odoc_file : Artifact.t) ~pkg ~requires =
+let link_odoc_rules sctx (odoc_file : Artifact.t) ~pkg ~pages ~requires =
   let ctx = Super_context.context sctx in
   let deps = Dep.deps ctx pkg requires in
   let dir = Path.build (Path.Build.parent_exn (Artifact.odocl_file ctx odoc_file)) in
@@ -468,6 +485,7 @@ let link_odoc_rules sctx (odoc_file : Artifact.t) ~pkg ~requires =
       ~quiet:false
       ~flags_for:(Some (Artifact.flags_for odoc_file))
       [ odoc_link_flags ctx pkg requires
+      ; Hidden_deps (Dune_engine.Dep.Set.of_files (List.map pages ~f:Path.build))
       ; A "-o"
       ; Target (Artifact.odocl_file ctx odoc_file)
       ; Dep (Path.build (Artifact.odoc_file odoc_file))
@@ -818,20 +836,57 @@ let entry_modules sctx ~pkg =
   Lib.Local.Map.of_list_exn l
 ;;
 
-let check_mlds_no_dupes ~pkg ~mlds ~path_to_string =
+let default_index_mld ctx pkg =
+  { Doc_sources.path = Paths.gen_mld_dir ctx pkg ++ "index.mld"
+  ; in_doc = Path.Local.of_string "index.mld"
+  }
+;;
+
+let check_mlds_no_dupes ~pkg ~mlds =
   match
-    List.rev_map mlds ~f:(fun ((_path, mld_name) as mld) -> mld_name, mld)
+    List.rev_map mlds ~f:(fun (mld : Doc_sources.mld) ->
+      Path.Local.to_string mld.in_doc, mld)
     |> String.Map.of_list
   with
   | Ok m -> m
-  | Error (_, (p1, _name1), (p2, _name2)) ->
+  | Error (_, mld1, mld2) ->
+    let path_to_string (mld : Doc_sources.mld) =
+      Path.to_string_maybe_quoted (Path.build mld.path)
+    in
     User_error.raise
       [ Pp.textf
           "Package %s has two mld's with the same basename %s, %s"
           (Package.Name.to_string pkg)
-          (path_to_string p1)
-          (path_to_string p2)
+          (path_to_string mld1)
+          (path_to_string mld2)
       ]
+;;
+
+(* A directory of pages named after a library of the package would have the
+   same parent id as the library: [pkg/pkg.foo]. *)
+let check_no_clash_with_libs sctx ~pkg mlds =
+  let+ libs = Super_context.context sctx |> Context.name |> libs_of_pkg ~pkg in
+  let libs =
+    String.Map.of_list_map_exn libs ~f:(fun lib ->
+      let lib = Lib.Local.to_lib lib in
+      Odoc_scope.Parent_id.to_string (Odoc_scope.lib_parent_id lib), Lib.name lib)
+  in
+  String.Map.iter mlds ~f:(fun (mld : Doc_sources.mld) ->
+    match Path.Local.split_first_component mld.in_doc with
+    | Some (dir, rest) when not (Path.Local.is_root rest) ->
+      let dir = Path.Local.of_string (Filename.to_string dir) in
+      let parent_id = Odoc_scope.pkg_page_parent_id pkg ~dir in
+      (match String.Map.find libs (Odoc_scope.Parent_id.to_string parent_id) with
+       | None -> ()
+       | Some lib ->
+         User_error.raise
+           [ Pp.textf
+               "Package %s has a page %s in a directory named after its library %s."
+               (Package.Name.to_string pkg)
+               (Path.Local.to_string mld.in_doc)
+               (Lib_name.to_string lib)
+           ])
+    | Some _ | None -> ())
 ;;
 
 let report_warnings warnings =
@@ -846,8 +901,7 @@ let report_warnings warnings =
     in
     User_warning.emit
       [ Pp.textf
-          "Dune does not yet support building documentation for assets, and mlds in a \
-           non-flat hierarchy. Ignoring %s."
+          "Dune does not yet support building documentation for assets. Ignoring %s."
           l
       ]
 ;;
@@ -855,13 +909,9 @@ let report_warnings warnings =
 let mlds sctx pkg =
   let+ mlds = Packages.mlds sctx pkg in
   List.partition_map mlds ~f:(fun (mld : Doc_sources.mld) ->
-    match Path.Local.explode mld.in_doc with
-    | [ name ] ->
-      let ext = Filename.extension name in
-      if Filename.Extension.Or_empty.check ext mld_ext
-      then Left (mld.path, Filename.remove_extension name |> Filename.to_string)
-      else Right mld
-    | _ -> Right mld)
+    if Filename.Extension.Or_empty.check (Path.Local.extension mld.in_doc) mld_ext
+    then Left mld
+    else Right mld)
 ;;
 
 let odoc_artefacts sctx target =
@@ -871,22 +921,25 @@ let odoc_artefacts sctx target =
   | Pkg pkg ->
     let+ mlds =
       let+ mlds, _ = mlds sctx pkg in
-      let mlds =
-        check_mlds_no_dupes ~pkg ~mlds ~path_to_string:(fun p ->
-          Path.to_string_maybe_quoted (Path.build p))
-      in
-      String.Map.update mlds "index" ~f:(function
-        | None -> Some (Paths.gen_mld_dir ctx pkg ++ "index.mld", "index")
+      let mlds = check_mlds_no_dupes ~pkg ~mlds in
+      String.Map.update mlds "index.mld" ~f:(function
+        | None -> Some (default_index_mld ctx pkg)
         | Some _ as s -> s)
     in
-    String.Map.to_list_map mlds ~f:(fun _ (path, name) ->
-      Mld.create ~path ~name |> Mld.odoc_file ~doc_dir:dir |> Artifact.make ~target)
+    String.Map.to_list_map mlds ~f:(fun _ { Doc_sources.path; in_doc } ->
+      Mld.create ~path ~in_doc |> Mld.odoc_file ~doc_dir:dir |> Artifact.make ~target)
   | Lib lib ->
     let+ modules = entry_modules_by_lib sctx lib in
     List.filter_map modules ~f:(fun m ->
       match Module.kind m with
       | Impl_vmodule -> None
       | _ -> Some (module_odoc_file ~odoc_dir:dir m |> Artifact.make ~target))
+;;
+
+let package_pages sctx pkg =
+  match pkg with
+  | None -> Memo.return []
+  | Some pkg -> odoc_artefacts sctx (Pkg pkg) >>| List.map ~f:Artifact.odoc_file
 ;;
 
 let setup_lib_odocl_rules_def =
@@ -912,7 +965,9 @@ let setup_lib_odocl_rules_def =
   let f (sctx, lib, requires) =
     let* odocs = odoc_artefacts sctx (Lib lib) in
     let pkg = Lib_info.package (Lib.Local.info lib) in
-    Memo.parallel_iter odocs ~f:(fun odoc -> link_odoc_rules sctx ~pkg ~requires odoc)
+    let* pages = package_pages sctx pkg in
+    Memo.parallel_iter odocs ~f:(fun odoc ->
+      link_odoc_rules sctx ~pkg ~pages ~requires odoc)
   in
   Memo.With_implicit_output.create
     "setup_library_odocls_rules"
@@ -984,10 +1039,11 @@ let setup_pkg_odocl_rules_def =
     let* () = Memo.parallel_iter libs ~f:(setup_lib_odocl_rules sctx ~requires)
     and* pkg_odocs =
       let* pkg_odocs = odoc_artefacts sctx (Pkg pkg) in
+      let pages = List.map pkg_odocs ~f:Artifact.odoc_file in
       let pkg = Some pkg in
       let+ () =
         Memo.parallel_iter pkg_odocs ~f:(fun odoc ->
-          link_odoc_rules sctx ~pkg ~requires odoc)
+          link_odoc_rules sctx ~pkg ~pages ~requires odoc)
       in
       pkg_odocs
     and* lib_odocs =
@@ -1229,8 +1285,8 @@ let copy_renamed_mlds ~sctx ~ctx pkg mlds =
      [_doc/_mlds/<pkg>], whose rules are produced by [package_mlds]. *)
   let gen_mld_dir = Paths.gen_mld_dir ctx pkg in
   String.Map.values mlds
-  |> Memo.parallel_iter ~f:(fun (path, name) ->
-    let copy = Mld.odoc_input ~gen_mld_dir (Mld.create ~path ~name) in
+  |> Memo.parallel_iter ~f:(fun { Doc_sources.path; in_doc } ->
+    let copy = Mld.odoc_input ~gen_mld_dir (Mld.create ~path ~in_doc) in
     if Path.Build.equal copy path
     then Memo.return ()
     else add_rule sctx (Action_builder.copy ~src:(Path.build path) ~dst:copy))
@@ -1245,23 +1301,23 @@ let package_mlds =
          Rules.collect (fun () ->
            let* mlds, warnings = mlds sctx pkg in
            report_warnings warnings;
-           let mlds =
-             check_mlds_no_dupes ~pkg ~mlds ~path_to_string:(fun p ->
-               Path.to_string_maybe_quoted (Path.build p))
-           in
+           let mlds = check_mlds_no_dupes ~pkg ~mlds in
+           let* () = check_no_clash_with_libs sctx ~pkg mlds in
            let ctx = Super_context.context sctx in
            let* () = copy_renamed_mlds ~sctx ~ctx pkg mlds in
-           if String.Map.mem mlds "index"
+           if String.Map.mem mlds "index.mld"
            then Memo.return mlds
            else (
-             let gen_mld = Paths.gen_mld_dir ctx pkg ++ "index.mld" in
+             let ({ Doc_sources.path = gen_mld; _ } as index) =
+               default_index_mld ctx pkg
+             in
              let* entry_modules = entry_modules sctx ~pkg in
              let+ () =
                add_rule
                  sctx
                  (Action_builder.write_file gen_mld (default_index ~pkg entry_modules))
              in
-             String.Map.set mlds "index" (gen_mld, "index"))))
+             String.Map.set mlds "index.mld" index)))
   in
   fun sctx ~pkg -> Memo.exec memo (sctx, pkg)
 ;;
@@ -1273,10 +1329,10 @@ let setup_package_odoc_rules sctx ~pkg =
      back to a package name here. Need to try and change that one day. *)
   let* odocs =
     String.Map.values mlds
-    |> Memo.parallel_map ~f:(fun (path, name) ->
+    |> Memo.parallel_map ~f:(fun { Doc_sources.path; in_doc } ->
       compile_mld
         sctx
-        (Mld.create ~path ~name)
+        (Mld.create ~path ~in_doc)
         ~pkg
         ~doc_dir:(Paths.odocs ctx (Pkg pkg))
         ~includes:(Action_builder.return []))

@@ -37,16 +37,15 @@ Let's verify that:
     "_build/install/default/doc/testing_mld/odoc-pages/tutorial/tuto2.mld" {"odoc-pages/tutorial/tuto2.mld"}
   ]
 
-Even though dune does not support yet building the doc with hierarchy, I can't
-resist building the doc to check what happens: currently, only top-level mld
-files are included in the doc generation.
+The pages of the doc are built in the same hierarchy. Assets are not supported
+yet and are ignored:
 
   $ dune build @doc
-  Warning: Dune does not yet support building documentation for assets, and
-  mlds in a non-flat hierarchy. Ignoring examples/example1/index.mld,
-  examples/example2/index.mld, examples/index.mld, examples/summary.mld,
-  img1.png, img2.png, tutorial/tuto1.mld, tutorial/tuto2.mld.
+  Warning: Dune does not yet support building documentation for assets.
+  Ignoring img1.png, img2.png.
   $ ls _build/default/_doc/_html/testing_mld
   db.js
+  examples
   index.html
   notes.html
+  tutorial

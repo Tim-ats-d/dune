@@ -1285,13 +1285,54 @@ let ext_package_mlds (ctx : Context.t) (pkg : Package.Name.t) =
     |> List.concat
 ;;
 
+let check_mlds_no_dupes ~pkg ~mlds =
+  match
+    List.rev_map mlds ~f:(fun ((_path, mld_name) as mld) -> mld_name, mld)
+    |> String.Map.of_list
+  with
+  | Ok m -> m
+  | Error (_, (p1, _name1), (p2, _name2)) ->
+    User_error.raise
+      [ Pp.textf
+          "Package %s has two mld's with the same basename %s, %s"
+          (Package.Name.to_string pkg)
+          (Path.to_string_maybe_quoted p1)
+          (Path.to_string_maybe_quoted p2)
+      ]
+;;
+
+let report_warnings warnings =
+  match warnings with
+  | [] -> ()
+  | _ :: _ ->
+    let l =
+      warnings
+      |> List.map ~f:(fun (mld : Doc_sources.mld) -> Path.Local.to_string mld.in_doc)
+      |> List.sort ~compare:String.compare
+      |> String.concat ~sep:", "
+    in
+    User_warning.emit
+      [ Pp.textf
+          "Dune does not yet support building documentation for assets, and mlds in a \
+           non-flat hierarchy. Ignoring %s."
+          l
+      ]
+;;
+
 let pkg_mlds sctx pkg =
   let* pkgs = Dune_load.packages () in
   if Package.Name.Map.mem pkgs pkg
-  then
-    let+ res, warnings = Odoc.mlds sctx pkg in
-    let () = Odoc.report_warnings warnings in
-    List.map ~f:(fun (p, name) -> Path.build p, name) res
+  then (
+    let+ pages, assets = Odoc.mlds sctx pkg in
+    let pages, nested_pages =
+      List.partition_map pages ~f:(fun (mld : Doc_sources.mld) ->
+        match Path.Local.explode mld.in_doc with
+        | [ name ] ->
+          Left (Path.build mld.path, Filename.remove_extension name |> Filename.to_string)
+        | _ -> Right mld)
+    in
+    report_warnings (nested_pages @ assets);
+    pages)
   else (
     let ctx = Super_context.context sctx in
     ext_package_mlds ctx pkg)
@@ -1301,7 +1342,7 @@ let pkg_artifacts sctx index pkg =
   let ctx = Super_context.context sctx in
   let+ mlds_map =
     let+ mlds = pkg_mlds sctx pkg in
-    Odoc.check_mlds_no_dupes ~pkg ~mlds ~path_to_string:Path.to_string_maybe_quoted
+    check_mlds_no_dupes ~pkg ~mlds
   in
   let artifacts =
     let mlds_noindex =

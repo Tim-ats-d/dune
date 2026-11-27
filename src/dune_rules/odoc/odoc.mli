@@ -11,18 +11,11 @@ val odoc_files_in_dirs : Path.t list -> _ Command.Args.t
 val is_documentation_relevant : Lib.t -> bool Memo.t
 val libs_of_pkg : Context_name.t -> pkg:Package.Name.t -> Lib.Local.t list Memo.t
 
+(** The pages and the assets of the documentation of a package. *)
 val mlds
   :  Super_context.t
   -> Dune_lang.Package_name.t
-  -> ((Path.Build.t * string) list * Doc_sources.mld list) Memo.t
-
-val report_warnings : Doc_sources.mld list -> unit
-
-val check_mlds_no_dupes
-  :  pkg:Package.Name.t
-  -> mlds:('path * string) list
-  -> path_to_string:('path -> string)
-  -> ('path * string) String.Map.t
+  -> (Doc_sources.mld list * Doc_sources.mld list) Memo.t
 
 val run_odoc
   :  Super_context.t
